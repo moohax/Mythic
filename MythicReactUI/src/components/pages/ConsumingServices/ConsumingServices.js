@@ -1,7 +1,6 @@
 import React from 'react';
 import { ConsumingServicesTable } from './ConsumingServicesTable';
 
-
 export function ConsumingServices({me}){
 
     return (

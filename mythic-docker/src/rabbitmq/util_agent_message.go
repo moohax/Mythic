@@ -236,7 +236,7 @@ func recursiveProcessAgentMessage(agentMessageInput AgentMessageRawInput) recurs
 				0, "debug", database.MESSAGE_LEVEL_INFO)
 		} else {
 			SendAllOperationsMessage(fmt.Sprintf("Parsing agent message - step 1 (get data): \n%s",
-				string(*agentMessageInput.RawMessage)),
+				base64.StdEncoding.EncodeToString(*agentMessageInput.RawMessage)),
 				0, "debug", database.MESSAGE_LEVEL_INFO)
 		}
 
@@ -331,11 +331,13 @@ func recursiveProcessAgentMessage(agentMessageInput AgentMessageRawInput) recurs
 					// this means we should try to get some delegated tasks if they exist for our callback
 					delegateResponses = append(delegateResponses, getDelegateTaskMessages(uuidInfo, agentUUIDLength)...)
 				}
+				delete(decryptedMessage, "get_delegate_tasks")
 			}
 		case "upload":
 			{
 				go SendAllOperationsMessage(fmt.Sprintf("Agent %s is using deprecated method of file transfer with the 'upload' action.", uuidInfo.PayloadTypeName),
 					uuidInfo.OperationID, "debug", database.MESSAGE_LEVEL_INFO)
+				logging.LogError(nil, "deprecated form of upload detected, please update agent code to use new method")
 				response, err = handleAgentMessagePostResponse(&map[string]interface{}{
 					"action": "post_response",
 					"responses": []map[string]interface{}{
@@ -455,6 +457,14 @@ func recursiveProcessAgentMessage(agentMessageInput AgentMessageRawInput) recurs
 				}
 			}
 		}
+		if _, ok := decryptedMessage["alerts"]; ok {
+			alerts := []agentMessagePostResponseAlert{}
+			if err := mapstructure.Decode(decryptedMessage["alerts"], &alerts); err != nil {
+				logging.LogError(err, "Failed to parse alert messages")
+			} else {
+				go handleAgentMessagePostResponseAlerts(uuidInfo.OperationID, &alerts)
+			}
+		}
 		if _, ok := decryptedMessage[CALLBACK_PORT_TYPE_SOCKS]; ok {
 			socksMessages := []proxyFromAgentMessage{}
 			//logging.LogDebug("got socks data from agent", "data", decryptedMessage[CALLBACK_PORT_TYPE_SOCKS])
@@ -474,7 +484,7 @@ func recursiveProcessAgentMessage(agentMessageInput AgentMessageRawInput) recurs
 				go proxyPorts.SendDataToCallbackIdPortType(uuidInfo.CallbackID, CALLBACK_PORT_TYPE_RPORTFWD, rpfwdMessages)
 			}
 		}
-		// regardless of the message type, get proxy data if it exists
+		// regardless of the message type, get proxy data if it exists (for both socks and rpfwd)
 		delegateResponses = append(delegateResponses, getDelegateProxyMessages(uuidInfo, agentUUIDLength)...)
 		if len(delegateResponses) > 0 {
 			response["delegates"] = delegateResponses
@@ -708,14 +718,16 @@ func DecryptMessage(uuidInfo *cachedUUIDInfo, agentMessage []byte) (map[string]i
 		if uuidInfo.TranslationContainerName == "" {
 			// we decrypt and return the JSON bytes
 			//logging.LogTrace("about to decrypt", "key", hex.EncodeToString(*uuidInfo.DecKey), "agentMessage", hex.EncodeToString(agentMessage))
-			if decrypted, err := uuidInfo.IterateAndAct(agentMessage, "decrypt"); err != nil {
-				//if decrypted, err := mythicCrypto.DecryptAES256HMAC(uuidInfo.getAllKeys(), agentMessage); err != nil {
+			decrypted, err := uuidInfo.IterateAndAct(agentMessage, "decrypt")
+			if err != nil {
 				return nil, err
-			} else if err := json.Unmarshal(decrypted, &jsonAgentMessage); err != nil {
-				return nil, err
-			} else {
-				return jsonAgentMessage, nil
 			}
+			err = json.Unmarshal(decrypted, &jsonAgentMessage)
+			if err != nil {
+				return nil, err
+			}
+			return jsonAgentMessage, nil
+
 		} else {
 			// we decrypt, but then need to pass to translation container
 			if decrypted, err := uuidInfo.IterateAndAct(agentMessage, "decrypt"); err != nil {
@@ -916,6 +928,8 @@ func reflectBackOtherKeys(response *map[string]interface{}, other *map[string]in
 		"delegates": 1,
 		"responses": 1,
 		"action":    1,
+		"rpfwd":     1,
+		"alerts":    1,
 	}
 	//logging.LogInfo("other keys", "other", *other)
 	for key, val := range *other {
