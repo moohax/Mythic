@@ -17,7 +17,7 @@ func setMythicConfigDefaultValues() {
 	// nginx configuration
 	mythicEnv.SetDefault("nginx_port", 7443)
 	mythicEnv.SetDefault("nginx_host", "mythic_nginx")
-	mythicEnv.SetDefault("nginx_bind_localhost_only", false)
+	mythicEnv.SetDefault("nginx_bind_localhost_only", true)
 	mythicEnv.SetDefault("nginx_use_ssl", true)
 	// mythic react UI configuration
 	mythicEnv.SetDefault("mythic_react_host", "mythic_react")
