@@ -396,6 +396,21 @@ func addMythicServiceDockerComposeEntry(service string) {
 		pStruct["environment"] = []string{
 			"JUPYTER_TOKEN=${JUPYTER_TOKEN}",
 		}
+
+		pStruct["deploy"] = map[string]interface{}{
+			"resources": map[string]interface{}{
+				"reservations": map[string]interface{}{
+					"devices": []map[string]interface{}{
+						{
+							"driver":       "nvidia",
+							"count":        1,
+							"capabilities": []string{"gpu"},
+						},
+					},
+				},
+			},
+		}
+
 	case "mythic_mlflow":
 		pStruct["build"] = map[string]interface{}{
 			"context": "./mlflow-docker",
