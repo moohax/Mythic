@@ -33,7 +33,7 @@ type agentMessagePostResponseMessage struct {
 
 type agentMessagePostResponse struct {
 	TaskID          string                                    `json:"task_id" mapstructure:"task_id"`
-	SequenceNumber  *int64                                    `json:"sequence_num" mapstructure:"sequence_num"`
+	SequenceNumber  *int64                                    `json:"sequence_num,omitempty" mapstructure:"sequence_num,omitempty"`
 	Completed       *bool                                     `json:"completed,omitempty" mapstructure:"completed,omitempty"`
 	UserOutput      *string                                   `json:"user_output,omitempty" mapstructure:"user_output,omitempty"`
 	Status          *string                                   `json:"status,omitempty" mapstructure:"status,omitempty"`
@@ -50,6 +50,7 @@ type agentMessagePostResponse struct {
 	CallbackTokens  *[]agentMessagePostResponseCallbackTokens `json:"callback_tokens,omitempty" mapstructure:"callback_tokens,omitempty"`
 	Download        *agentMessagePostResponseDownload         `json:"download,omitempty" mapstructure:"download,omitempty"`
 	Upload          *agentMessagePostResponseUpload           `json:"upload,omitempty" mapstructure:"upload,omitempty"`
+	Alerts          *[]agentMessagePostResponseAlert          `json:"alerts,omitempty" mapstructure:"alerts,omitempty"`
 	Other           map[string]interface{}                    `json:"-" mapstructure:",remain"` // capture any 'other' keys that were passed in so we can reply back with them
 }
 
@@ -178,6 +179,10 @@ type agentMessagePostResponseUploadResponse struct {
 	TotalChunks int    `json:"total_chunks" mapstructure:"total_chunks"`
 	ChunkData   []byte `json:"chunk_data" mapstructure:"chunk_data"`
 	ChunkNum    int    `json:"chunk_num" mapstructure:"chunk_num"`
+}
+type agentMessagePostResponseAlert struct {
+	Source *string `json:"source,omitempty" mapstructure:"source,omitempty"`
+	Alert  string  `json:"alert" mapstructure:"alert"`
 }
 
 func handleAgentMessagePostResponse(incoming *map[string]interface{}, uUIDInfo *cachedUUIDInfo) (map[string]interface{}, error) {
@@ -310,6 +315,9 @@ func handleAgentMessagePostResponse(incoming *map[string]interface{}, uUIDInfo *
 						logging.LogError(err, "Failed to decode mapstructure for agent upload response")
 					}
 				}
+				if agentResponse.Alerts != nil {
+					go handleAgentMessagePostResponseAlerts(currentTask.OperationID, agentResponse.Alerts)
+				}
 				reflectBackOtherKeys(&mythicResponse, &agentResponse.Other)
 				// always updating at least the timestamp for the last thing that happened
 				if _, err := database.DB.NamedExec(`UPDATE task SET
@@ -324,6 +332,7 @@ func handleAgentMessagePostResponse(incoming *map[string]interface{}, uUIDInfo *
 					if currentTask.Completed && updatedToCompleted {
 						// use updatedToCompleted to try to make sure we only do this once per task
 						go CheckAndProcessTaskCompletionHandlers(currentTask.ID)
+						go emitTaskLog(currentTask.ID)
 					}
 				}
 			}
@@ -366,10 +375,15 @@ func handleAgentMessagePostResponseUserOutput(task databaseStructs.Task, agentRe
 			return
 		}
 	}
-	if _, err := database.DB.NamedExec(`INSERT INTO response
+	if statement, err := database.DB.PrepareNamed(`INSERT INTO response
 		("timestamp", task_id, response, sequence_number, operation_id)
-		VALUES (:timestamp, :task_id, :response, :sequence_number, :operation_id)`, responseOutput); err != nil {
+		VALUES (:timestamp, :task_id, :response, :sequence_number, :operation_id)
+		RETURNING id`); err != nil {
+		logging.LogError(err, "Failed to prepare new named statement for user_output", "task_id", responseOutput.TaskID)
+	} else if err := statement.Get(&responseOutput.ID, responseOutput); err != nil {
 		logging.LogError(err, "Failed to insert new user_output", "task_id", responseOutput.TaskID)
+	} else {
+		go emitResponseLog(responseOutput.ID)
 	}
 }
 func handleAgentMessagePostResponseRemovedFiles(task databaseStructs.Task, removedFiles *[]agentMessagePostResponseRemovedFiles) error {
@@ -380,9 +394,11 @@ func handleAgentMessagePostResponseRemovedFiles(task databaseStructs.Task, remov
 			host = strings.ToUpper(*rmData.Host)
 		}
 		likePath := rmData.Path + "%"
+		likePath = strings.ReplaceAll(likePath, "\\", "\\\\")
+		//logging.LogInfo("updating removal path", "path", likePath, "host", host)
 		if _, err := database.DB.Exec(`UPDATE mythictree SET
-	  deleted=true
-	  WHERE host=$1 AND full_path LIKE $2 AND operation_id=$3 AND "tree_type"=$4`,
+		  deleted=true
+		  WHERE host=$1 AND full_path LIKE $2 AND operation_id=$3 AND "tree_type"=$4`,
 			host, likePath, task.OperationID, databaseStructs.TREE_TYPE_FILE); err != nil {
 			logging.LogError(err, "Failed to mark file and children as deleted")
 			return err
@@ -1035,6 +1051,8 @@ func addFilePermissions(fileBrowser *agentMessagePostResponseFileBrowser) map[st
 		fileMetaData["permissions"] = x
 	case map[string]interface{}:
 		fileMetaData["permissions"] = []interface{}{x}
+	case nil:
+		fileMetaData["permissions"] = []interface{}{}
 	default:
 		fileMetaData["permissions"] = []interface{}{}
 		logging.LogError(nil, "Unknown permissions type", "data", fileBrowser.Permissions)
@@ -1052,6 +1070,8 @@ func addChildFilePermissions(fileBrowser *agentMessagePostResponseFileBrowserChi
 		fileMetaData["permissions"] = x
 	case map[string]interface{}:
 		fileMetaData["permissions"] = []interface{}{x}
+	case nil:
+		fileMetaData["permissions"] = []interface{}{}
 	default:
 		logging.LogError(nil, "Unknown permissions type", "data", fileBrowser.Permissions)
 	}
@@ -1072,13 +1092,23 @@ func handleAgentMessagePostResponseFileBrowser(task databaseStructs.Task, fileBr
 		}
 		go resolveAndCreateParentPathsForTreeNode(pathData, task, databaseStructs.TREE_TYPE_FILE)
 		// now that the parents and all ancestors are resolved, process the current path and all children
-
+		realParentPath := strings.Join(pathData.PathPieces, pathData.PathSeparator)
+		// check for the instance of // as a leading path
+		if len(realParentPath) > 2 {
+			if realParentPath[0] == '/' && realParentPath[1] == '/' {
+				realParentPath = realParentPath[1:]
+			}
+		}
+		if fileBrowser.Name == "" {
+			logging.LogError(nil, "Can't create file browser entry with empty name")
+			return errors.New("can't make file browser entry with empty name")
+		}
 		fullPath := treeNodeGetFullPath(
-			[]byte(fileBrowser.ParentPath),
+			[]byte(realParentPath),
 			[]byte(fileBrowser.Name),
 			[]byte(pathData.PathSeparator),
 			databaseStructs.TREE_TYPE_FILE)
-		parentPath := treeNodeGetFullPath([]byte(fileBrowser.ParentPath), []byte(""), []byte(pathData.PathSeparator), databaseStructs.TREE_TYPE_FILE)
+		parentPath := treeNodeGetFullPath([]byte(realParentPath), []byte(""), []byte(pathData.PathSeparator), databaseStructs.TREE_TYPE_FILE)
 		name := treeNodeGetFullPath([]byte(""), []byte(fileBrowser.Name), []byte(pathData.PathSeparator), databaseStructs.TREE_TYPE_FILE)
 		//logging.LogInfo("creating info for listed entry", "name", fileBrowser.Name, "parent", fileBrowser.ParentPath, "fullPath", fullPath, "adjustedParentPath", parentPath)
 		newTree := databaseStructs.MythicTree{
@@ -1185,7 +1215,7 @@ func handleAgentMessagePostResponseFileBrowser(task databaseStructs.Task, fileBr
 					Os:              newTree.Os,
 				}
 				newTreeChild.FullPath = treeNodeGetFullPath(fullPath, []byte(newEntry.Name), []byte(pathData.PathSeparator), databaseStructs.TREE_TYPE_FILE)
-				fileMetaData := addChildFilePermissions(&newEntry)
+				fileMetaData = addChildFilePermissions(&newEntry)
 				newTreeChild.Metadata = GetMythicJSONTextFromStruct(fileMetaData)
 				createTreeNode(&newTreeChild)
 			}
@@ -1433,7 +1463,7 @@ func treeNodeGetFullPath(parentPath []byte, name []byte, pathSeparator []byte, t
 		//logging.LogInfo("getting full path", "fullPath", fullPath, "parentPath", parentPath, "name", name)
 		if len(fullPath) > 1 {
 			if fullPath[len(fullPath)-1] == pathSeparator[len(pathSeparator)-1] {
-				return fullPath[:len(fullPath)-1]
+				fullPath = fullPath[:len(fullPath)-1]
 			}
 		}
 		return fullPath
@@ -1483,7 +1513,7 @@ func getParentPathFullPathName(pathData utils.AnalyzedPath, endIndex int, treeTy
 }
 func updateTreeNode(treeNode databaseStructs.MythicTree) {
 	if _, err := database.DB.NamedExec(`UPDATE mythictree SET
-        success=:success, deleted=:deleted, metadata=:metadata
+        success=:success, deleted=:deleted, metadata=:metadata, task_id=:task_id
 		WHERE id=:id
 `, treeNode); err != nil {
 		logging.LogError(err, "Failed to update tree node")
@@ -1509,6 +1539,10 @@ func deleteTreeNode(treeNode databaseStructs.MythicTree, cascade bool) {
 	}
 }
 func createTreeNode(treeNode *databaseStructs.MythicTree) {
+	if len(treeNode.Name) == 0 {
+		logging.LogError(nil, "Can't create file browser entry with empty name")
+		return
+	}
 	if statement, err := database.DB.PrepareNamed(`INSERT INTO mythictree
 		(host, task_id, operation_id, "name", full_path, parent_path, tree_type, can_have_children, success, metadata, os) 
 		VALUES 
@@ -1516,7 +1550,7 @@ func createTreeNode(treeNode *databaseStructs.MythicTree) {
 		ON CONFLICT (host, operation_id, full_path, tree_type)
 		DO UPDATE SET
 		task_id=:task_id, "name"=:name, parent_path=:parent_path, can_have_children=:can_have_children,
-		    success=:success, metadata=:metadata, os=:os, "timestamp"=now()
+		    metadata=:metadata, os=:os, "timestamp"=now(), deleted=false
 		    RETURNING id`); err != nil {
 		logging.LogError(err, "Failed to create new mythictree statement")
 	} else if err = statement.Get(&treeNode.ID, treeNode); err != nil {
@@ -1570,5 +1604,17 @@ func handleAgentMessagePostResponseEdges(edges *[]agentMessagePostResponseEdges)
 				callbackGraph.RemoveByAgentIds(edge.Source, edge.Destination, edge.C2Profile)
 			}
 		}
+	}
+}
+func handleAgentMessagePostResponseAlerts(operationID int, alerts *[]agentMessagePostResponseAlert) {
+	if alerts == nil {
+		return
+	}
+	for _, alert := range *alerts {
+		source := ""
+		if alert.Source != nil {
+			source = *alert.Source
+		}
+		SendAllOperationsMessage(alert.Alert, operationID, source, database.MESSAGE_LEVEL_WARNING)
 	}
 }

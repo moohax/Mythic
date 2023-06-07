@@ -30,14 +30,16 @@ mutation testWebhookWorks($service_type: String!){
     }
 }
 `;
-export function ConsumingServicesTable(props){
+
+export function ConsumingServicesTable({servicesList}){
     const theme = useTheme();
     const [testWebhook] = useMutation(testWebhookMutation, {
         onCompleted: data => {
             if(data.consumingServicesTestWebhook.status === "success"){
                 snackActions.success("Successfully sent test message to service");
             } else {
-                snackActions.error(data.consumingServicesTestWebhook.error)
+                console.log(data.consumingServicesTestWebhook.error)
+                snackActions.error("No webhook listening")
             }
             
         },
@@ -46,7 +48,7 @@ export function ConsumingServicesTable(props){
         }
     });
     const issueTestWebook = (service_type) => {
-        testWebhook({variables: {service_type: service_type}})
+        testWebhook({variables: {service_type: service_type}});
     }
     const [testLog] = useMutation(testLogMutation, {
         onCompleted: data => {
@@ -62,7 +64,7 @@ export function ConsumingServicesTable(props){
         }
     });
     const issueTestLog = (service_type) => {
-        testLog({variables: {service_type: service_type}})
+        testLog({variables: {service_type: service_type}});
     }
     return (
         <React.Fragment>
@@ -81,19 +83,19 @@ export function ConsumingServicesTable(props){
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        <TableRow hover>
+                        <TableRow hover >
                             <TableCell>New Callback Log</TableCell>
                             <TableCell>
                                 <IconButton onClick={()=>{issueTestLog("new_callback")}}> <SyncAltIcon  /></IconButton>
                             </TableCell>
                         </TableRow>
-                        <TableRow hover>
+                        <TableRow hover >
                             <TableCell>New Credential Log</TableCell>
                             <TableCell>
                                 <IconButton onClick={()=>{issueTestLog("new_credential")}}> <SyncAltIcon  /></IconButton>
                             </TableCell>
                         </TableRow>
-                        <TableRow hover>
+                        <TableRow hover >
                             <TableCell>New File Log</TableCell>
                             <TableCell>
                                 <IconButton onClick={()=>{issueTestLog("new_file")}}> <SyncAltIcon  /></IconButton>
@@ -111,16 +113,22 @@ export function ConsumingServicesTable(props){
                                 <IconButton onClick={()=>{issueTestLog("new_task")}}> <SyncAltIcon  /></IconButton>
                             </TableCell>
                         </TableRow>
-                        <TableRow hover>
+                        <TableRow hover >
                             <TableCell>New Payload Log</TableCell>
                             <TableCell>
                                 <IconButton onClick={()=>{issueTestLog("new_payload")}} > <SyncAltIcon /></IconButton>
                             </TableCell>
                         </TableRow>
-                        <TableRow hover>
+                        <TableRow hover >
                             <TableCell>New Keylog Log</TableCell>
                             <TableCell>
                                 <IconButton onClick={()=>{issueTestLog("new_keylog")}}> <SyncAltIcon  /></IconButton>
+                            </TableCell>
+                        </TableRow>
+                        <TableRow hover >
+                            <TableCell>New Response Log</TableCell>
+                            <TableCell>
+                                <IconButton onClick={()=>{issueTestLog("new_response")}}> <SyncAltIcon  /></IconButton>
                             </TableCell>
                         </TableRow>
                     </TableBody>
@@ -135,13 +143,13 @@ export function ConsumingServicesTable(props){
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        <TableRow hover>
+                        <TableRow hover >
                             <TableCell>New Feedback Webhook</TableCell>
                             <TableCell>
                                 <IconButton onClick={()=>{issueTestWebook("new_feedback")}}><PublicIcon /></IconButton>
                             </TableCell>
                         </TableRow>
-                        <TableRow hover>
+                        <TableRow hover >
                             <TableCell>New Callback Webhook</TableCell>
                             <TableCell>
                                 <IconButton onClick={()=>{issueTestWebook("new_callback")}}><PublicIcon /></IconButton>
@@ -153,13 +161,13 @@ export function ConsumingServicesTable(props){
                                 <IconButton onClick={()=>{issueTestWebook("new_startup")}}><PublicIcon /></IconButton>
                             </TableCell>
                         </TableRow>
-                        <TableRow hover>
+                        <TableRow hover >
                             <TableCell>New Alert Webhook</TableCell>
                             <TableCell>
                                 <IconButton onClick={()=>{issueTestWebook("new_alert")}}><PublicIcon /></IconButton>
                             </TableCell>
                         </TableRow>
-                        <TableRow hover>
+                        <TableRow hover >
                             <TableCell>New Custom Webhook</TableCell>
                             <TableCell>
                                 <IconButton onClick={()=>{issueTestWebook("new_custom")}}><PublicIcon /></IconButton>

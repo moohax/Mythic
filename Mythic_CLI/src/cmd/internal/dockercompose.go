@@ -227,7 +227,7 @@ func addMythicServiceDockerComposeEntry(service string) {
 			"args":    buildArguments,
 		}
 		pStruct["healthcheck"] = map[string]interface{}{
-			"test":         "wget --no-check-certificate -SqO - https://127.0.0.1:${NGINX_PORT}",
+			"test":         "curl -k https://127.0.0.1:${NGINX_PORT}/new/login",
 			"interval":     "30s",
 			"timeout":      "60s",
 			"retries":      5,
@@ -237,7 +237,7 @@ func addMythicServiceDockerComposeEntry(service string) {
 		if !mythicEnv.GetBool("NGINX_USE_SSL") {
 			nginxUseSSL = ""
 			pStruct["healthcheck"] = map[string]interface{}{
-				"test":         []string{"CMD-SHELL", "curl -k http://127.0.0.1:${NGINX_PORT}"},
+				"test":         "curl http://127.0.0.1:${NGINX_PORT}/new/login",
 				"interval":     "30s",
 				"timeout":      "60s",
 				"retries":      5,
@@ -289,7 +289,7 @@ func addMythicServiceDockerComposeEntry(service string) {
 			"args":    buildArguments,
 		}
 		pStruct["healthcheck"] = map[string]interface{}{
-			"test":         "rabbitmq-diagnostics -q status && rabbitmq-diagnostics -q check_local_alarms",
+			"test":         "rabbitmq-diagnostics -q check_port_connectivity",
 			"interval":     "60s",
 			"timeout":      "30s",
 			"retries":      5,
@@ -410,7 +410,9 @@ func addMythicServiceDockerComposeEntry(service string) {
 				},
 			},
 		}
-
+    if curConfig.IsSet("services.mythic_jupyter.deploy") {
+			pStruct["deploy"] = curConfig.Get("services.mythic_jupyter.deploy")
+      
 	case "mythic_mlflow":
 		pStruct["build"] = map[string]interface{}{
 			"context": "./mlflow-docker",

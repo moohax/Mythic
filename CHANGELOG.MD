@@ -4,6 +4,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1-rc19] - 2023-06-05
+
+### Changed
+
+- Fixed a bug where *nix filepaths might be leading // causing file browser issues
+- Fixed bug where deleted files that come back weren't getting marked as not deleted
+- Fixed an issue in the UI with timestamps not converting properly between UTC and local time
+
+## [3.0.1-rc18] - 2023-06-02
+
+### Changed
+
+- Fixed a bug where agents reporting back file browser paths with UNC formats wouldn't get properly ingested
+
+## [3.0.1-rc17] - 2023-06-01
+
+### Changed
+
+- Fixed a bug where the `get_delegate_tasks` key wasn't getting passed to the delegate message check
+- Fixed a bug where rpfwd messages weren't getting checked for delegate messages
+
+## [3.0.1-rc16] - 2023-06-01
+
+### Changed
+
+- Removed ability to check number of consumers for logging/webhooks since it caused the messages to roundrobin instead
+
+## [3.0.1-rc15] - 2023-05-31
+
+### Changed
+
+- Updated the UI to handle boolean parameters with `-paramName` as `true` on the CLI
+- Updated the UI to show number of listeners for consuming services as well as green/orange counts
+- Updated Mythic to emit a new `new_response` log type for user_output
+- Updated the checks for existing containers to re-use rabbitmq channels if possible
+- Updated the health check for rabbitmq to just check for ports listening since no alarms are configured
+- Fixed an issue when reporting back deleted files that Windows paths with `\\` need to be escaped again, `\\\\`
+- Updated task logging to emit when first created and also when task completes
+
+### Added
+
+- Added new `alerts` key for `post_response` messages to send alerts to the operation event log
+- Added new `alerts` key for top level messages to send alerts to teh operation event log
+
 ## [3.0.1-rc14] - 2023-05-26
 
 ### Changed

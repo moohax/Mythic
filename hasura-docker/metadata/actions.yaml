@@ -580,4 +580,5 @@ custom_types:
     - name: createOperationEventLogOutput
     - name: GetIOCOutput
     - name: C2SampleMessageOutput
+    - name: consumingServicesListOutput
   scalars: []
